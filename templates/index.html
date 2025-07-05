@@ -1,159 +1,254 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>古诗生成系统</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&display=swap" rel="stylesheet">
-    <style type="text/tailwindcss">
-        @layer utilities {
-            .content-auto {
-                content-visibility: auto;
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>古诗生成系统</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Long+Cang&display=swap" rel="stylesheet">
+
+  <style type="text/tailwindcss">
+    @layer utilities {
+      .content-auto {
+        content-visibility: auto;
+      }
+      .text-shadow {
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+      }
+      .poem-style {
+        font-family: "Long Cang", cursive;
+        font-size: 1.8rem;
+        color: #5d4037;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        text-indent: 0 !important;
+        margin: 0;
+        padding: 0;
+      }
+      .poem-line {
+        text-indent: 0 !important;
+        margin: 0;
+        padding: 0;
+        line-height: 2.5rem;
+      }
+    }
+    /* 墨水画布 - 纯视觉层 */
+    #ink-layer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* 关键：绝不阻挡下方元素 */
+            z-index: 9999;
+        }
+  </style>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: "#8b4513",
+          },
+          fontFamily: {
+            gufeng: ['"Long Cang"', 'cursive'],
+          }
+        },
+      },
+    };
+  </script>
+</head>
+
+<body class="min-h-screen bg-neutral font-sans" style="background: url('/static/6.png') no-repeat center center fixed; background-size: cover;">
+     <!-- 墨水效果层（悬浮在最上层但不阻挡操作） -->
+    <canvas id="ink-layer"></canvas>
+  <div class="container mx-auto px-4 py-8 max-w-4xl">
+    <header class="text-center mb-10">
+      <h1 class="text-[clamp(1.8rem,4vw,3rem)] font-bold text-primary text-shadow mb-3 font-gufeng">
+        📜你的古版嘴替
+      </h1>
+      <p class="text-gray-600 text-xl max-w-xl mx-auto font-gufeng">
+        你出字，我来诗，一起玩转古诗生成的小奇迹
+      </p>
+    </header>
+
+    <main class="bg-white bg-opacity-90 rounded-xl shadow-lg p-6 md:p-8 mb-10">
+      {% if error_msg %}
+      <div class="mb-6 p-4 bg-red-100 border-l-4 border-red-500 text-red-700 rounded">
+        <p>{{ error_msg }}</p>
+      </div>
+      {% endif %}
+
+      <form method="post" action="/generate" class="space-y-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label for="start_char" class="block text-xl font-medium text-gray-700 mb-2 font-gufeng">
+              起始字符 <span class="text-gray-500 text-base">(请输入一个汉字)</span>
+            </label>
+            <input type="text" id="start_char" name="start_char" maxlength="1"
+              class="w-full px-4 py-3 text-gray-700 text-xl border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50"
+              value="{{ start_char if start_char else '花' }}" required />
+          </div>
+
+          <div>
+            <label class="block text-xl font-medium text-gray-700 mb-2 font-gufeng">模型选择</label>
+            <div class="grid grid-cols-2 gap-4">
+              <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer {{ 'bg-primary/10 border-primary' if model_type == 'rnn' else 'hover:bg-gray-50' }}">
+                <input type="radio" name="model_type" value="rnn" {{ 'checked' if model_type == 'rnn' or not model_type else '' }} class="mr-2 scale-125" />
+                <span class="font-gufeng text-lg">RNN (GRU)</span>
+              </label>
+              <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer {{ 'bg-primary/10 border-primary' if model_type == 'transformer' else 'hover:bg-gray-50' }}">
+                <input type="radio" name="model_type" value="transformer" {{ 'checked' if model_type == 'transformer' else '' }} class="mr-2 scale-125" />
+                <span class="font-gufeng text-lg">Transformer</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label class="block text-xl font-medium text-gray-700 mb-2 font-gufeng">诗体选择</label>
+            <div class="grid grid-cols-2 gap-4">
+              <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer {{ 'bg-primary/10 border-primary' if poem_type == '五言' else 'hover:bg-gray-50' }}">
+                <input type="radio" name="poem_type" value="五言" {{ 'checked' if poem_type == '五言' or not poem_type else '' }} class="mr-2 scale-125" />
+                <span class="font-gufeng text-lg">五言绝句</span>
+              </label>
+              <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer {{ 'bg-primary/10 border-primary' if poem_type == '七言' else 'hover:bg-gray-50' }}">
+                <input type="radio" name="poem_type" value="七言" {{ 'checked' if poem_type == '七言' else '' }} class="mr-2 scale-125" />
+                <span class="font-gufeng text-lg">七言绝句</span>
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <label for="temperature" class="block text-xl font-medium text-gray-700 mb-2 font-gufeng">
+              创作风格 <span class="text-gray-500 text-base">(值越小越严谨，越大越自由)</span>
+            </label>
+            <div class="flex items-center">
+              <input type="range" id="temperature" name="temperature" min="0.1" max="2" step="0.1"
+                value="{{ temperature if temperature else 0.8 }}"
+                class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer" />
+              <span id="temp_value" class="ml-2 text-gray-700 text-lg font-gufeng">{{ temperature if temperature else 0.8 }}</span>
+            </div>
+            <div class="flex justify-between text-base text-gray-500 mt-1 font-gufeng">
+              <span>严谨</span>
+              <span>自由</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="text-center">
+          <button type="submit"
+            class="px-8 py-3 bg-primary text-white rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-300 transform hover:scale-105 font-gufeng text-xl">
+            <i class="fa fa-pencil-square-o mr-2"></i>生成古诗
+          </button>
+        </div>
+      </form>
+
+      {% if generated_poem %}
+      <div class="mt-10 p-6 bg-amber-50 border border-amber-200 rounded-lg">
+        <h2 class="text-xl font-semibold text-center mb-4 font-gufeng">生成的古诗</h2>
+        <h2 class="text-2xl font-bold text-center mb-2 text-gray-800 font-gufeng">《{{ generated_title }}》</h2>
+        <pre class="poem-style whitespace-pre-line">{{ generated_poem }}</pre>
+        <div class="mt-4 text-center text-sm text-gray-500 font-gufeng">
+          <span class="inline-block px-3 py-1 bg-amber-100 rounded-full">
+            <i class="fa fa-cogs mr-1"></i> {{ "RNN (LSTM)" if model_type == "rnn" else "Transformer" }} 模型
+          </span>
+          <span class="inline-block px-3 py-1 bg-amber-100 rounded-full ml-2">
+            <i class="fa fa-paint-brush mr-1"></i> {{ poem_type }}
+          </span>
+        </div>
+      </div>
+      {% endif %}
+    </main>
+
+    <footer class="text-center text-gray-600 py-4 font-gufeng">
+      <p>你的古版嘴替 &copy; 2025 | 古诗研究型人工智障</p>
+    </footer>
+  </div>
+
+  <script>
+     // ====== 纯视觉墨水效果 ======
+     const canvas = document.getElementById('ink-layer');
+        const ctx = canvas.getContext('2d');
+        let particles = [];
+        
+        // 同步画布与窗口尺寸
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+        
+        // 墨水粒子类
+        class InkParticle {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.size = Math.random() * 8 + 2;
+                this.color = `rgba(58, 40, 31, ${Math.random() * 0.5 + 0.2})`;
+                this.speedX = Math.random() * 3 - 1.5;
+                this.speedY = Math.random() * 3 - 1.5;
+                this.life = 100;
             }
-            .text-shadow {
-                text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            
+            update() {
+                this.x += this.speedX;
+                this.y += this.speedY;
+                this.life--;
+                this.size *= 0.98;
             }
-            .bg-paper {
-                background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z' fill='%23d9b88f' fill-opacity='0.1' fill-rule='evenodd'/%3E%3C/svg%3E");
-            }
-            .poem-style {
-                font-family: 'Ma Shan Zheng', cursive;
-                font-size: 1.8rem;
-                line-height: 2.5rem;
-                text-align: center;
-                color: #5D4037;
+            
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
             }
         }
-    </style>
-</head>
-<body class="min-h-screen bg-paper bg-neutral font-sans">
-    <div class="container mx-auto px-4 py-8 max-w-4xl">
-        <header class="text-center mb-10">
-            <h1 class="text-[clamp(2rem,4vw,3rem)] font-bold text-primary text-shadow mb-3">
-                <i class="fa fa-book mr-2"></i>古诗生成系统
-            </h1>
-            <p class="text-gray-600 max-w-xl mx-auto">
-                基于深度学习的古诗创作助手，输入一个汉字，生成五言或七言古诗
-            </p>
-        </header>
-
-        <main class="bg-white bg-opacity-90 rounded-xl shadow-lg p-6 md:p-8 mb-10">
-            {% if error_msg %}
-            <div class="mb-6 p-4 bg-red-100 border-l-4 border-red-500 text-red-700 rounded">
-                <p>{{ error_msg }}</p>
-            </div>
-            {% endif %}
-
-            <form method="post" action="/generate" class="space-y-6">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label for="start_char" class="block text-lg font-medium text-gray-700 mb-2">
-                            起始字符 <span class="text-gray-500 text-sm">(请输入一个汉字)</span>
-                        </label>
-                        <input type="text" id="start_char" name="start_char" maxlength="1"
-                            class="w-full px-4 py-3 text-gray-700 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50"
-                            value="{{ start_char | default('春') }}" required>
-                    </div>
-
-                    <div>
-                        <label class="block text-lg font-medium text-gray-700 mb-2">模型选择</label>
-                        <div class="grid grid-cols-2 gap-4">
-                            <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer 
-                                {{ 'bg-primary/10 border-primary' if model_type == 'rnn' else 'hover:bg-gray-50' }}">
-                                <input type="radio" name="model_type" value="rnn" 
-                                    {{ 'checked' if model_type == 'rnn' else '' }} class="mr-2">
-                                <span>RNN (LSTM)</span>
-                            </label>
-                            <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer 
-                                {{ 'bg-primary/10 border-primary' if model_type == 'transformer' else 'hover:bg-gray-50' }}">
-                                <input type="radio" name="model_type" value="transformer" 
-                                    {{ 'checked' if model_type == 'transformer' else '' }} class="mr-2">
-                                <span>Transformer</span>
-                            </label>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label class="block text-lg font-medium text-gray-700 mb-2">诗体选择</label>
-                        <div class="grid grid-cols-2 gap-4">
-                            <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer 
-                                {{ 'bg-primary/10 border-primary' if poem_type == '五言' else 'hover:bg-gray-50' }}">
-                                <input type="radio" name="poem_type" value="五言" 
-                                    {{ 'checked' if poem_type == '五言' else '' }} class="mr-2">
-                                <span>五言古诗</span>
-                            </label>
-                            <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer 
-                                {{ 'bg-primary/10 border-primary' if poem_type == '七言' else 'hover:bg-gray-50' }}">
-                                <input type="radio" name="poem_type" value="七言" 
-                                    {{ 'checked' if poem_type == '七言' else '' }} class="mr-2">
-                                <span>七言古诗</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div>
-                        <label for="temperature" class="block text-lg font-medium text-gray-700 mb-2">
-                            创作风格 <span class="text-gray-500 text-sm">(值越小越严谨，越大越自由)</span>
-                        </label>
-                        <div class="flex items-center">
-                            <input type="range" id="temperature" name="temperature" min="0.1" max="2" step="0.1"
-                                value="{{ temperature | default(0.8) }}"
-                                class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
-                            <span id="temp_value" class="ml-2 text-gray-700">{{ temperature | default(0.8) }}</span>
-                        </div>
-                        <div class="flex justify-between text-sm text-gray-500 mt-1">
-                            <span>严谨</span>
-                            <span>自由</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="text-center">
-                    <button type="submit" class="px-8 py-3 bg-primary text-white rounded-lg 
-                        hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/50 
-                        transition-all duration-300 transform hover:scale-105">
-                        <i class="fa fa-pencil-square-o mr-2"></i>生成古诗
-                    </button>
-                </div>
-            </form>
-
-            {% if generated_poem %}
-            <div class="mt-10 p-6 bg-amber-50 border border-amber-200 rounded-lg">
-                <h2 class="text-xl font-semibold text-center mb-4">生成的古诗</h2>
-               
-                <h2 class="text-2xl font-bold text-center mb-2 text-gray-800">{{ generated_title }}</h2>
-
-
-                <pre class="poem-style whitespace-pre-line">
-                    {{ generated_poem }}
-                    </pre>
-
-                <div class="mt-4 text-center text-sm text-gray-500">
-                    <span class="inline-block px-3 py-1 bg-amber-100 rounded-full">
-                        <i class="fa fa-cogs mr-1"></i> {{ "RNN (LSTM)" if model_type == "rnn" else "Transformer" }} 模型
-                    </span>
-                    <span class="inline-block px-3 py-1 bg-amber-100 rounded-full ml-2">
-                        <i class="fa fa-paint-brush mr-1"></i> {{ poem_type }}
-                    </span>
-                </div>
-            </div>
-            {% endif %}
-        </main>
-
-        <footer class="text-center text-gray-600 py-4">
-            <p>古诗生成系统 &copy; 2025 | 基于深度学习的古诗创作助手</p>
-        </footer>
-    </div>
-
-    <script>
+        
+        // 生成粒子（视觉-only）
+        function spawnParticles(x, y, count = 5) {
+            for (let i = 0; i < count; i++) {
+                if (Math.random() > 0.3) { // 控制密度
+                    particles.push(new InkParticle(x, y));
+                }
+            }
+        }
+        
+        // 动画循环
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            for (let i = 0; i < particles.length; i++) {
+                particles[i].update();
+                particles[i].draw();
+                
+                if (particles[i].life <= 0) {
+                    particles.splice(i, 1);
+                    i--;
+                }
+            }
+            
+            requestAnimationFrame(animate);
+        }
+        animate();
+        
+        // 鼠标移动时生成粒子
+        document.addEventListener('mousemove', (e) => {
+            spawnParticles(e.clientX, e.clientY, 3);
+        });
         // 更新温度显示
         document.getElementById('temperature').addEventListener('input', function() {
             document.getElementById('temp_value').textContent = this.value;
         });
-    </script>
+    
+  </script>
 </body>
 </html>

@@ -1,7 +1,5 @@
 import torch
 from torch.utils.data import Dataset
-import numpy as np
-import os
 
 class PoemDataset(Dataset):
     def __init__(self, poems, vocab, word2idx, idx2word, max_len=100):
@@ -61,8 +59,7 @@ def process_data(poems, word2idx, poem_type='五言'):
         if len(poem) < 20 or len(poem) > 80:
             continue
             
-        # 添加开始和结束标记
-        processed_poem = '<START>' + poem + '<END>'
-        processed_poems.append(processed_poem)
+        # 这里不再添加 <START> <END>，留给Dataset处理，防止重复
+        processed_poems.append(poem)
         
     return processed_poems
