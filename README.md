@@ -1,3 +1,10 @@
+# 简介
+通过输入起始字符，选择模型类型，诗体，采样策略，点击按钮可生成诗句
+# 项目界面
+![image](https://github.com/user-attachments/assets/bc61bc9a-4ccb-46c2-bfa7-ab7f89b46566)
+![image](https://github.com/user-attachments/assets/b3b72cca-e568-4a72-8f5c-2e2dcbebce0d)
+
+
 # 运⾏说明
 
 - 直接在命令行输入命令：
