@@ -1,8 +1,8 @@
 # 运⾏说明
 
 直接在命令行输入命令：
- ```bash
- uvicorn app:app --reload
+   ```bash
+   uvicorn app:app --reload
 - 然后在浏览器访问http://localhost:8000
 
 # 参数设置
