@@ -9,6 +9,8 @@ from models.transformer_model import TransformerModel
 from utils.preprocess import load_data, build_vocab
 from utils.sampling import sample_next_token
 from utils.poem_formatter import format_poem
+import os
+import re
 
 app = FastAPI()
 
@@ -16,22 +18,21 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# 加载数据和词表
 poems = load_data("data/poems.txt")
 vocab, word2idx, idx2word = build_vocab(poems)
-
 vocab_size = len(vocab)
+
+# 提前定义模型结构（不加载参数）
 rnn_model = RNNModel(vocab_size, 128, 256, 2).to(device)
 transformer_model = TransformerModel(vocab_size, 128, 4, 256, 2).to(device)
 
-rnn_model.load_state_dict(torch.load("models/rnn_五言.pth", map_location=device))
-transformer_model.load_state_dict(torch.load("models/transformer_七言.pth", map_location=device))
-
-rnn_model.eval()
-transformer_model.eval()
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
+
 
 @app.post("/generate", response_class=HTMLResponse)
 async def generate(request: Request):
@@ -40,12 +41,10 @@ async def generate(request: Request):
     model_type = form_data.get("model_type", "rnn")
     poem_type = form_data.get("poem_type", "五言")
     temperature = float(form_data.get("temperature", 0.8))
+    top_k = int(form_data.get("top_k", 50))
+    top_p = float(form_data.get("top_p", 1.0))
 
-    # 根据诗体设置最大长度
-    if poem_type == '五言':
-        max_length = 50
-    else:  # 七言
-        max_length = 73
+    max_length = 50 if poem_type == '五言' else 73
 
     if len(start_char) != 1:
         return templates.TemplateResponse("index.html", {
@@ -55,13 +54,34 @@ async def generate(request: Request):
             "model_type": model_type,
             "poem_type": poem_type,
             "temperature": temperature,
-            "max_length": max_length
+            "top_k": top_k,
+            "top_p": top_p,
         })
 
-    model = rnn_model if model_type == "rnn" else transformer_model
-    model.eval()
+    # ====== 动态加载模型权重 ======
+    if model_type == "rnn":
+        model = rnn_model
+        weight_path = f"models/rnn_{poem_type}.pth"
+    else:
+        model = transformer_model
+        weight_path = f"models/transformer_{poem_type}.pth"
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # 检查模型文件是否存在
+    if not os.path.exists(weight_path):
+        return templates.TemplateResponse("index.html", {
+            "request": request,
+            "error_msg": f"模型文件不存在: {weight_path}",
+            "start_char": start_char,
+            "model_type": model_type,
+            "poem_type": poem_type,
+            "temperature": temperature,
+            "top_k": top_k,
+            "top_p": top_p,
+        })
+
+    model.load_state_dict(torch.load(weight_path, map_location=device))
+    model.eval()
+    # ============================
 
     generated_tokens = [start_char]
     hidden = None
@@ -72,34 +92,32 @@ async def generate(request: Request):
 
             for _ in range(max_length):
                 output, hidden = model(input_tensor, hidden)
-                next_token_logits = output[:, -1, :]
-                next_token = sample_next_token(next_token_logits[0], temperature=temperature, top_k=50)
+                logits = output[:, -1, :]
+                next_token = sample_next_token(logits[0], temperature=temperature, top_k=top_k, top_p=top_p)
                 next_char = idx2word.get(next_token.item(), '<UNK>')
                 if next_char == '<END>':
                     break
                 generated_tokens.append(next_char)
                 input_tensor = next_token.view(1, 1)
-
         else:
             input_idx = [word2idx.get('<START>', 0), word2idx.get(start_char, word2idx['<UNK>'])]
             input_tensor = torch.tensor([input_idx], dtype=torch.long).to(device)
 
             for _ in range(max_length):
                 output = model(input_tensor)
-                next_token_logits = output[:, -1, :]
-                next_token = sample_next_token(next_token_logits[0], temperature=temperature, top_k=50)
+                logits = output[:, -1, :]
+                next_token = sample_next_token(logits[0], temperature=temperature, top_k=top_k, top_p=top_p)
                 next_char = idx2word.get(next_token.item(), '<UNK>')
                 if next_char == '<END>':
                     break
                 generated_tokens.append(next_char)
                 input_tensor = torch.cat([input_tensor, next_token.unsqueeze(0)], dim=1)
 
-        # 🔥 标题生成部分（使用RNN模型）
+        # 生成标题
         title_chars = [start_char]
         title_tensor = torch.tensor([[word2idx.get(start_char, word2idx['<UNK>'])]], dtype=torch.long).to(device)
         title_hidden = None
-
-        for _ in range(3):  # 标题总共最多4个字
+        for _ in range(3):
             output, title_hidden = rnn_model(title_tensor, title_hidden)
             logits = output[:, -1, :]
             next_token = sample_next_token(logits[0], temperature=0.8, top_k=30)
@@ -109,11 +127,9 @@ async def generate(request: Request):
             title_chars.append(next_char)
             title_tensor = next_token.view(1, 1)
 
-        import re
         raw_title = ''.join(title_chars)
-        clean_title = re.sub(r'[^\u4e00-\u9fa5]', '', raw_title)  # 只保留汉字
+        clean_title = re.sub(r'[^\u4e00-\u9fa5]', '', raw_title)
 
-    # 格式化输出正文
     formatted_poem = format_poem(generated_tokens, poem_type)
 
     return templates.TemplateResponse("index.html", {
@@ -122,7 +138,8 @@ async def generate(request: Request):
         "model_type": model_type,
         "poem_type": poem_type,
         "temperature": temperature,
-        "max_length": max_length,
+        "top_k": top_k,
+        "top_p": top_p,
         "generated_poem": formatted_poem,
-        "generated_title": clean_title  # 模板中添加 {{ generated_title }} 显示标题
+        "generated_title": clean_title
     })

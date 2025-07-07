@@ -30,4 +30,3 @@ def format_poem(tokens_or_text, poem_type='五言'):
         lines.append(line)
 
     return "".join(lines).strip()
-

@@ -3,15 +3,77 @@ import torch.nn as nn
 from utils.preprocess import load_data, build_vocab, process_data
 from models.rnn_model import RNNModel
 from models.transformer_model import TransformerModel
-from main import generate_poem  # 直接复用你已有的生成函数
 import matplotlib.pyplot as plt
 import os
 import matplotlib
-import matplotlib.pyplot as plt
+import torch.nn.functional as F
 
 # 设置matplotlib支持中文字体和负号正常显示
-matplotlib.rcParams['font.family'] = 'SimHei'  # 或者你系统中支持的中文字体，比如 'SimSun'
+matplotlib.rcParams['font.family'] = 'SimHei'
 matplotlib.rcParams['axes.unicode_minus'] = False
+
+
+def top_k_top_p_filtering(logits, top_k=0, top_p=0.0):
+    top_k = min(top_k, logits.size(-1))
+    if top_k > 0:
+        values, _ = torch.topk(logits, top_k)
+        min_values = values[..., -1, None]
+        logits = torch.where(logits < min_values, torch.full_like(logits, float('-inf')), logits)
+    if top_p > 0.0:
+        sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+        cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+        sorted_mask = cumulative_probs > top_p
+        sorted_mask[..., 1:] = sorted_mask[..., :-1].clone()
+        sorted_mask[..., 0] = 0
+        # 这里将 scatter 的维度改为 0，避免维度错误
+        indices_to_remove = sorted_mask.scatter(0, sorted_indices, sorted_mask)
+        logits = logits.masked_fill(indices_to_remove, float('-inf'))
+    return logits
+
+
+def generate_poem(model, word2idx, idx2word, temperature=1.0, top_k=0, top_p=0.0,
+                  model_type="rnn", start_word="春", max_len=30, repetition_penalty=1.2,
+                  repetition_window=10):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    model.eval()
+
+    input_seq = [word2idx.get(ch, word2idx['<UNK>']) for ch in start_word]
+    input_tensor = torch.tensor(input_seq, dtype=torch.long).unsqueeze(0).to(device)
+
+    result = start_word
+    hidden = None
+
+    for _ in range(max_len - len(start_word)):
+        if model_type == "rnn":
+            output, hidden = model(input_tensor, hidden)
+        else:
+            output = model(input_tensor)
+
+        logits = output[0, -1, :] / temperature
+
+        # 统计最近 repetition_window 个token出现次数，动态加重惩罚
+        recent_tokens = input_tensor[0, -repetition_window:].tolist()
+        token_counts = {}
+        for token_id in recent_tokens:
+            token_counts[token_id] = token_counts.get(token_id, 0) + 1
+
+        for token_id, count in token_counts.items():
+            # 指数惩罚，出现次数越多，惩罚越重
+            logits[token_id] /= (repetition_penalty ** count)
+
+        filtered_logits = top_k_top_p_filtering(logits, top_k=top_k, top_p=top_p)
+        probs = F.softmax(filtered_logits, dim=-1)
+        next_id = torch.multinomial(probs, num_samples=1).item()
+
+        next_char = idx2word.get(next_id, "<UNK>")
+        result += next_char
+
+        next_input = torch.tensor([[next_id]], dtype=torch.long).to(device)
+        input_tensor = torch.cat([input_tensor, next_input], dim=1)
+
+    return result
+
 
 
 def compute_metrics(texts):
@@ -54,10 +116,9 @@ def load_model(args, vocab_size):
 
 
 def evaluate_sampling_strategies():
-    # 参数
     args = {
-        "model_type": "rnn",       # 改为 "transformer" 可测试 Transformer
-        "poem_type": "五言",       # 或 "五言"
+        "model_type": "rnn",
+        "poem_type": "七言",
         "embed_dim": 128,
         "hidden_dim": 256,
         "num_layers": 2,
@@ -71,22 +132,20 @@ def evaluate_sampling_strategies():
 
     model = load_model(args, vocab_size=len(vocab))
 
-    # 设置采样策略
     sampling_settings = [
-    {"name": "T=1.2", "temperature": 1.2, "top_k": 0, "top_p": 0.0},           # 最自由，温度最高，无限制
-    {"name": "T=1.0", "temperature": 1.0, "top_k": 0, "top_p": 0.0},           # 自由，普通随机采样
-    {"name": "T=0.8+TopP0.9", "temperature": 0.8, "top_k": 0, "top_p": 0.9},   # 半自由，核采样控制多样性
-    {"name": "T=0.7+TopK10", "temperature": 0.7, "top_k": 10, "top_p": 0.0},   # 半严谨，温度和Top-K限制采样范围
-    {"name": "T=0.6+TopK5", "temperature": 0.6, "top_k": 5, "top_p": 0.0},     # 最严谨，温度低+Top-K严格限制
-]
-
+        {"name": "T=1.4+TopP0.98", "temperature": 1.4, "top_k": 0, "top_p": 0.98},
+        {"name": "T=1.3+TopP0.95", "temperature": 1.3, "top_k": 0, "top_p": 0.95},
+        {"name": "T=1.2", "temperature": 1.2, "top_k": 0, "top_p": 0.0},
+        {"name": "T=1.1+TopK20", "temperature": 1.1, "top_k": 20, "top_p": 0.0},
+        {"name": "T=1.0+TopK20+TopP0.95", "temperature": 1.0, "top_k": 20, "top_p": 0.95},
+    ]
 
     results = {}
 
     for setting in sampling_settings:
         print(f"采样策略: {setting['name']}")
         generated_poems = []
-        for _ in range(100):  # 生成 100 首
+        for _ in range(150):  # 生成150条，稍微多一点
             poem = generate_poem(
                 model=model,
                 word2idx=word2idx,
@@ -94,7 +153,9 @@ def evaluate_sampling_strategies():
                 temperature=setting["temperature"],
                 top_k=setting["top_k"],
                 top_p=setting["top_p"],
-                model_type=args["model_type"]
+                model_type=args["model_type"],
+                repetition_penalty=1.4,
+                max_len=40
             )
             generated_poems.append(poem)
 
@@ -134,3 +195,5 @@ def plot_results(results):
 if __name__ == "__main__":
     result_metrics = evaluate_sampling_strategies()
     plot_results(result_metrics)
+
+
