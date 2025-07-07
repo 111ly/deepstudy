@@ -1,8 +1,9 @@
 # 简介
 这是一个基于PyTorch的智能古诗生成系统，支持RNN和Transformer两种深度学习模型，能够按需生成五言或七言绝句。用户可通过调节温度值、Top-K/Top-P等参数控制诗句风格。
 # 项目界面
-![image](https://github.com/user-attachments/assets/bc61bc9a-4ccb-46c2-bfa7-ab7f89b46566)
-![image](https://github.com/user-attachments/assets/b3b72cca-e568-4a72-8f5c-2e2dcbebce0d)
+![屏幕截图 2025-07-07 144630](https://github.com/user-attachments/assets/beaffc5a-227a-4d6b-b0fb-53af4c20d716)
+![image](https://github.com/user-attachments/assets/41b78891-c480-4327-a125-c00ed46af3e4)
+
 
 
 # 运⾏说明
